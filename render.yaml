@@ -6,7 +6,7 @@ services:
     startCommand: cd src && python -m backend.api.main
     envVars:
       - key: PYTHON_VERSION
-        value: 3.13.0
+        value: 3.11.0
       - key: PORT
         value: 8000
       - key: QDRANT_CLOUD_URL
