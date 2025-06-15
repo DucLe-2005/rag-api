@@ -30,9 +30,6 @@ def test_query():
         f"{BASE_URL}/api/query",
         json={
             "query": "What were the major market events in the last quarter?",
-            "top_k": 5,
-            "expand_n_query": 2,
-            "keep_top_k": 3
         }
     )
     print(f"Status Code: {response.status_code}")
@@ -48,9 +45,6 @@ def test_query():
         f"{BASE_URL}/api/query",
         json={
             "query": "Show me the latest earnings reports from this month",
-            "top_k": 5,
-            "expand_n_query": 2,
-            "keep_top_k": 3
         }
     )
     print(f"Status Code: {response.status_code}")

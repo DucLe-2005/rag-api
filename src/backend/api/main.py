@@ -35,20 +35,9 @@ class QueryRequest(BaseModel):
     query: str
     collection_type: Optional[str] = None
     additional_filters: Optional[Dict[str, Any]] = None
-    top_k: int = 5
-    expand_n_query: int = 3
-    keep_top_k: int = 5
-
-class QueryResponse(BaseModel):
-    context: Optional[List[str]] = None
-    metadata: Optional[Dict[str, Any]] = None
-
-    def to_json(self) -> Dict[str, Any]:
-        """Convert the response to a JSON-serializable dictionary."""
-        return {
-            "context": self.context or [],
-            "metadata": self.metadata or {}
-        }
+    top_k: int = 3
+    expand_n_query: int = 2
+    keep_top_k: int = 3
 
 @app.post("/api/query")
 async def process_query(request: QueryRequest) -> Dict[str, List[str]]:
