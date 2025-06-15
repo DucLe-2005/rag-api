@@ -9,10 +9,6 @@ services:
         value: 3.13.0
       - key: PORT
         value: 8000
-      - key: MAX_WORKERS
-        value: 2
-      - key: BATCH_SIZE
-        value: 32
       - key: QDRANT_CLOUD_URL
         sync: false
       - key: QDRANT_APIKEY

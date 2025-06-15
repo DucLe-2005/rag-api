@@ -4,9 +4,6 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import os
 import datetime
-import gc
-import psutil
-import logging
 
 import core.logger_utils as logger_utils
 
@@ -16,18 +13,6 @@ from core.rag.self_query import SelfQuery
 import uvicorn
 
 logger = logger_utils.get_logger(__name__)
-
-def log_memory_usage():
-    """Log current memory usage."""
-    process = psutil.Process(os.getpid())
-    memory_info = process.memory_info()
-    memory_usage_mb = memory_info.rss / 1024 / 1024  # Convert to MB
-    logger.info(f"Current memory usage: {memory_usage_mb:.2f} MB")
-
-def cleanup_memory():
-    """Force garbage collection and log memory usage."""
-    gc.collect()
-    log_memory_usage()
 
 app = FastAPI(
     title="Financial RAG Pipeline API",
@@ -68,15 +53,11 @@ class QueryResponse(BaseModel):
 @app.post("/api/query")
 async def process_query(request: QueryRequest) -> Dict[str, List[str]]:
     try:
-        # Log initial memory usage
-        log_memory_usage()
-        
         # Initialize retriever with query
         try:
             retriever = VectorRetriever(query=request.query)
         except Exception as e:
             logger.error(f"Error initializing retriever: {str(e)}")
-            cleanup_memory()  # Clean up memory on error
             raise HTTPException(
                 status_code=500,
                 detail="Error connecting to vector database. Please check your Qdrant connection settings."
@@ -90,11 +71,8 @@ async def process_query(request: QueryRequest) -> Dict[str, List[str]]:
                 collection_type=None,  # None means search all collections
                 additional_filters=request.additional_filters
             )
-            # Clean up memory after heavy operation
-            cleanup_memory()
         except Exception as e:
             logger.error(f"Error retrieving documents: {str(e)}")
-            cleanup_memory()  # Clean up memory on error
             raise HTTPException(
                 status_code=500,
                 detail="Error retrieving documents from vector database."
@@ -103,21 +81,16 @@ async def process_query(request: QueryRequest) -> Dict[str, List[str]]:
         # Rerank the hits
         try:
             context = retriever.rerank(hits=hits, keep_top_k=request.keep_top_k)
-            # Clean up memory after heavy operation
-            cleanup_memory()
         except Exception as e:
             logger.error(f"Error reranking documents: {str(e)}")
             context = []
-            cleanup_memory()  # Clean up memory on error
         
         return {"context": context}
             
     except HTTPException as he:
-        cleanup_memory()  # Clean up memory on error
         raise he
     except Exception as e:
         logger.error(f"Unexpected error processing query: {str(e)}")
-        cleanup_memory()  # Clean up memory on error
         raise HTTPException(
             status_code=500,
             detail=f"Unexpected error processing query: {str(e)}"

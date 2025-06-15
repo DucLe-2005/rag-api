@@ -3,9 +3,6 @@ import concurrent.futures
 from core.config import settings
 from qdrant_client import models
 from sentence_transformers.SentenceTransformer import SentenceTransformer
-import gc
-import psutil
-import os
 
 import core.logger_utils as logger_utils
 from core import lib
@@ -15,13 +12,6 @@ from core.rag.reranking import Reranker
 from core.rag.self_query import SelfQuery
 
 logger = logger_utils.get_logger(__name__)
-
-def log_memory_usage():
-    """Log current memory usage."""
-    process = psutil.Process(os.getpid())
-    memory_info = process.memory_info()
-    memory_usage_mb = memory_info.rss / 1024 / 1024
-    logger.info(f"Current memory usage: {memory_usage_mb:.2f} MB")
 
 class VectorRetriever:
     """
@@ -37,44 +27,12 @@ class VectorRetriever:
     ]
 
     def __init__(self, query: str) -> None:
-        self._client = None  # Lazy loading
+        self._client = QdrantDatabaseConnector()
         self.query = query
-        self._embedder = None  # Lazy loading
-        self._query_expander = None  # Lazy loading
-        self._metadata_extractor = None  # Lazy loading
-        self._reranker = None  # Lazy loading
-        self._max_workers = int(os.getenv("MAX_WORKERS", 2))
-        self._batch_size = int(os.getenv("BATCH_SIZE", 32))
-
-    def _get_client(self):
-        """Lazy load Qdrant client."""
-        if self._client is None:
-            self._client = QdrantDatabaseConnector()
-        return self._client
-
-    def _get_embedder(self):
-        """Lazy load embedding model."""
-        if self._embedder is None:
-            self._embedder = SentenceTransformer(settings.EMBEDDING_MODEL_ID)
-        return self._embedder
-
-    def _get_query_expander(self):
-        """Lazy load query expander."""
-        if self._query_expander is None:
-            self._query_expander = QueryExpansion()
-        return self._query_expander
-
-    def _get_metadata_extractor(self):
-        """Lazy load metadata extractor."""
-        if self._metadata_extractor is None:
-            self._metadata_extractor = SelfQuery()
-        return self._metadata_extractor
-
-    def _get_reranker(self):
-        """Lazy load reranker."""
-        if self._reranker is None:
-            self._reranker = Reranker()
-        return self._reranker
+        self._embedder = SentenceTransformer(settings.EMBEDDING_MODEL_ID)
+        self._query_expander = QueryExpansion()
+        self._metadata_extractor = SelfQuery()
+        self._reranker = Reranker()
 
     def _get_vector_collection_name(self, data_type: str) -> str:
         """Get the vector collection name for a given data type."""
@@ -89,13 +47,7 @@ class VectorRetriever:
     ) -> List[Any]:
         """Search a single query across specified collections with filters."""
         try:
-            # Get embedding in smaller batches
-            query_vector = self._get_embedder().encode(
-                generated_query,
-                batch_size=self._batch_size,
-                show_progress_bar=False
-            ).tolist()
-            
+            query_vector = self._embedder.encode(generated_query).tolist()
             search_filter = self._construct_search_query(
                 collection_type=collection_type,
                 additional_filters=additional_filters
@@ -111,7 +63,7 @@ class VectorRetriever:
                         collection_name=collection_name,
                         query=generated_query
                     )
-                    results = self._get_client().search(
+                    results = self._client.search(
                         collection_name=collection_name,
                         query_vector=query_vector,
                         query_filter=search_filter,
@@ -123,11 +75,6 @@ class VectorRetriever:
                         num_results=len(results)
                     )
                     all_results.extend(results)
-                    
-                    # Clean up after each collection search
-                    gc.collect()
-                    log_memory_usage()
-                    
                 except Exception as e:
                     logger.error(
                         "Error searching collection",
@@ -152,6 +99,7 @@ class VectorRetriever:
         """Create a filter for Qdrant search based on collection type and additional filters."""
         must_conditions = []
         
+        # Add collection type filter if specified
         if collection_type:
             must_conditions.append(
                 models.FieldCondition(
@@ -160,6 +108,7 @@ class VectorRetriever:
                 )
             )
         
+        # Add additional filters if specified
         if additional_filters:
             for key, value in additional_filters.items():
                 must_conditions.append(
@@ -180,12 +129,9 @@ class VectorRetriever:
     ) -> list:
         """Retrieve top k documents using query expansion."""
         try:
-            # Log initial memory usage
-            log_memory_usage()
-            
             # Extract date range and modify query if needed
-            metadata = self._get_metadata_extractor().extract_metadata(self.query)
-            self.query = metadata["modified_query"]
+            metadata = self._metadata_extractor.extract_metadata(self.query)
+            self.query = metadata["modified_query"]  # Update query directly
             
             logger.info(
                 "Starting query expansion",
@@ -193,7 +139,7 @@ class VectorRetriever:
             )
             
             # Generate expanded queries
-            generated_queries = self._get_query_expander().generate_response(
+            generated_queries = self._query_expander.generate_response(
                 self.query,
                 to_expand_to_n=to_expand_to_n_queries
             )
@@ -203,8 +149,8 @@ class VectorRetriever:
                 queries=generated_queries
             )
             
-            # Search using each generated query with limited workers
-            with concurrent.futures.ThreadPoolExecutor(max_workers=self._max_workers) as executor:
+            # Search using each generated query
+            with concurrent.futures.ThreadPoolExecutor() as executor:
                 search_tasks = [
                     executor.submit(
                         self._search_single_query,
@@ -216,13 +162,10 @@ class VectorRetriever:
                     for query in generated_queries
                 ]
 
-                hits = []
-                for future in concurrent.futures.as_completed(search_tasks):
-                    result = future.result()
-                    hits.extend(result)
-                    # Clean up after each query
-                    gc.collect()
-                    log_memory_usage()
+                hits = [
+                    task.result() for task in concurrent.futures.as_completed(search_tasks)
+                ]
+                hits = lib.flatten(hits)
 
             # Sort all hits by score and take top k
             hits.sort(key=lambda x: x.score, reverse=True)
@@ -249,18 +192,18 @@ class VectorRetriever:
     ) -> List[str]:
         """Rerank the retrieved documents."""
         try:
-            # Process content in batches
             content_list = [hit.payload["content"] for hit in hits]
-            rerank_hits = self._get_reranker().generate_response(
+            rerank_hits = self._reranker.generate_response(
                 query=self.query,
                 passages=content_list,
                 keep_top_k=keep_top_k
             )
-            
-            # Clean up after reranking
-            gc.collect()
-            log_memory_usage()
-            
+
+            logger.info(
+                "Reranked documents",
+                num_documents=len(rerank_hits)
+            )
+
             return rerank_hits
         except Exception as e:
             logger.error(
@@ -270,10 +213,5 @@ class VectorRetriever:
             return []
 
     def set_query(self, query: str):
-        """Set a new query."""
         self.query = query
-        # Clean up resources when setting new query
-        self._embedder = None
-        gc.collect()
-        log_memory_usage()
 
