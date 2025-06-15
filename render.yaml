@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: finbud-rag-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: cd src && python -m backend.api.main
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.0
+      - key: PORT
+        value: 8000
+      - key: QDRANT_CLOUD_URL
+        sync: false
+      - key: QDRANT_APIKEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL_ID
+        value: gpt-4 
