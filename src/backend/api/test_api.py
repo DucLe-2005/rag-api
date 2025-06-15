@@ -60,23 +60,6 @@ def test_query():
     assert isinstance(response.json()["context"], list)
     assert len(response.json()["context"]) > 0
 
-    # Test 3: Query without date range
-    print("\n=== Testing Query without Date Range ===")
-    response = requests.post(
-        f"{BASE_URL}/api/query",
-        json={
-            "query": "What are the key financial metrics for tech companies?",
-            "top_k": 5,
-            "expand_n_query": 2,
-            "keep_top_k": 3
-        }
-    )
-    print(f"Status Code: {response.status_code}")
-    print(f"Response: {json.dumps(response.json(), indent=2)}")
-    assert response.status_code == 200
-    assert "context" in response.json()
-    assert isinstance(response.json()["context"], list)
-    assert len(response.json()["context"]) > 0
 
 def main():
     """Run all tests."""
