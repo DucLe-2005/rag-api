@@ -23,11 +23,10 @@ app = FastAPI(
 # Configure CORS with more permissive settings
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
+    allow_origins=["http://localhost:8888", "https://finbud.pro/", "https://finbud-ai.netlify.app/"],
     allow_credentials=True,
     allow_methods=["*"],  # Allows all methods
     allow_headers=["*"],  # Allows all headers
-    expose_headers=["*"],  # Exposes all headers
     max_age=3600,  # Cache preflight requests for 1 hour
 )
 
